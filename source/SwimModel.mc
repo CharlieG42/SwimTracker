@@ -83,6 +83,7 @@ class SwimModel {
     private var _lastLapStartMs as Number  = 0;
     private var _gyroMagnitude  as Float   = 0.0f;
     private var _smoothedGyro   as Float   = 0.0f;
+    private var _gyroSupported   as Boolean = false;
 
     var strokeCountPeaks    as Number = 0;
     var strokeCountEstimate as Number = 0;
@@ -118,6 +119,21 @@ class SwimModel {
             poolLengthIdx = savedIdx as Number;
         }
         _loadDetectionSettings();
+        _checkGyroSupport();
+    }
+
+    private function _checkGyroSupport() as Void {
+        var sensors = Sensor.getSensorInfo();
+        if (sensors != null) {
+            for (var i = 0; i < sensors.size(); i++) {
+                var sensor = sensors[i];
+                if (sensor != null && sensor.getType() == Sensor.TYPE_GYROSCOPE) {
+                    _gyroSupported = true;
+                    return;
+                }
+            }
+        }
+        _gyroSupported = false;
     }
 
     private function _loadDetectionSettings() as Void {
@@ -229,7 +245,7 @@ class SwimModel {
             { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => "bool" }
         );
         _debugGyroField = _session.createField(
-            "debug_gyro_mag", 4, FitContributor.DATA_TYPE_FLOAT,
+            "debug_gyro_mag", 5, FitContributor.DATA_TYPE_FLOAT,
             { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => "rad/s" }
         );
 
@@ -342,9 +358,13 @@ class SwimModel {
         var options = {
             :period              => 1,
             :sampleRate          => ACCEL_SAMPLE_RATE,
-            :enableAccelerometer => true,
-            :enableGyroscope     => true
+            :enableAccelerometer => true
         };
+        
+        if (_gyroSupported) {
+            options.enableGyroscope = true;
+        }
+        
         Sensor.registerSensorDataListener(method(:onSensorData), options);
     }
 
@@ -365,7 +385,7 @@ class SwimModel {
         if (ampZ > amplitude) { amplitude = ampZ; }
 
         var gyroMag = 0.0f;
-        if (gyroData != null) {
+        if (_gyroSupported && gyroData != null) {
             var gx = _getMaxAmplitudeFromFloatArray(gyroData.x) / 1000.0f;
             var gy = _getMaxAmplitudeFromFloatArray(gyroData.y) / 1000.0f;
             var gz = _getMaxAmplitudeFromFloatArray(gyroData.z) / 1000.0f;
@@ -433,18 +453,35 @@ class SwimModel {
                 _peakDetected = false;
             }
 
-            if (_fastAccel < turnThreshold && _smoothedGyro > gyroThreshold) {
-                _isSwimming   = false;
-                _swimStartMs  = 0;
-                _peakDetected = false;
+            if (_gyroSupported) {
+                if (_fastAccel < turnThreshold && _smoothedGyro > gyroThreshold) {
+                    _isSwimming   = false;
+                    _swimStartMs  = 0;
+                    _peakDetected = false;
 
-                var timeSinceLastLap = elapsedMs - _lastPeakMs;
-                if (timeSinceLastLap >= minLapTimeMs) {
-                    _lastPeakMs = elapsedMs;
-                    if (_debugTurnField != null) {
-                        _debugTurnField.setData(1);
+                    var timeSinceLastLap = elapsedMs - _lastPeakMs;
+                    if (timeSinceLastLap >= minLapTimeMs) {
+                        _lastPeakMs = elapsedMs;
+                        if (_debugTurnField != null) {
+                            _debugTurnField.setData(1);
+                        }
+                        _recordLap();
                     }
-                    _recordLap();
+                }
+            } else {
+                if (_fastAccel < turnThreshold) {
+                    _isSwimming   = false;
+                    _swimStartMs  = 0;
+                    _peakDetected = false;
+
+                    var timeSinceLastLap = elapsedMs - _lastPeakMs;
+                    if (timeSinceLastLap >= minLapTimeMs) {
+                        _lastPeakMs = elapsedMs;
+                        if (_debugTurnField != null) {
+                            _debugTurnField.setData(1);
+                        }
+                        _recordLap();
+                    }
                 }
             }
         }
