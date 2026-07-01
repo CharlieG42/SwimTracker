@@ -1,10 +1,9 @@
-// SettingsView.mc - v4
+// SettingsView.mc - v5
 // Écran de réglage des paramètres de détection des virages.
-// Permet d'ajuster les seuils sans recompiler l'application,
-// pour itérer rapidement lors des tests en piscine.
+// Inclut maintenant le seuil gyroscope pour la fusion accéléromètre/gyro.
 //
 // Navigation :
-//   UP/DOWN   : se déplacer entre les 4 paramètres (mode navigation)
+//   UP/DOWN   : se déplacer entre les 5 paramètres (mode navigation)
 //   SET       : entrer en mode édition du paramètre sélectionné
 //   UP/DOWN   : +/- la valeur (mode édition)
 //   SET       : valider et revenir en mode navigation
@@ -23,9 +22,10 @@ class SettingsView extends WatchUi.View {
 
     private const PARAM_SWIM_THRESHOLD as Number = 0;
     private const PARAM_TURN_THRESHOLD as Number = 1;
-    private const PARAM_MIN_SWIM_TIME  as Number = 2;
-    private const PARAM_MIN_LAP_TIME   as Number = 3;
-    private const PARAM_COUNT          as Number = 4;
+    private const PARAM_GYRO_THRESHOLD as Number = 2;
+    private const PARAM_MIN_SWIM_TIME  as Number = 3;
+    private const PARAM_MIN_LAP_TIME   as Number = 4;
+    private const PARAM_COUNT          as Number = 5;
 
     function initialize(model as SwimModel) {
         View.initialize();
@@ -66,6 +66,10 @@ class SettingsView extends WatchUi.View {
             var v = _model.turnThreshold + SwimModel.TURN_THRESHOLD_STEP;
             if (v > SwimModel.TURN_THRESHOLD_MAX) { v = SwimModel.TURN_THRESHOLD_MAX; }
             _model.setTurnThreshold(v);
+        } else if (_selected == PARAM_GYRO_THRESHOLD) {
+            var v = _model.gyroThreshold + 0.1f;
+            if (v > 5.0f) { v = 5.0f; }
+            _model.setGyroThreshold(v);
         } else if (_selected == PARAM_MIN_SWIM_TIME) {
             var v = _model.minSwimTimeMs + SwimModel.MIN_SWIM_TIME_STEP;
             if (v > SwimModel.MIN_SWIM_TIME_MAX) { v = SwimModel.MIN_SWIM_TIME_MAX; }
@@ -88,6 +92,10 @@ class SettingsView extends WatchUi.View {
             var v = _model.turnThreshold - SwimModel.TURN_THRESHOLD_STEP;
             if (v < SwimModel.TURN_THRESHOLD_MIN) { v = SwimModel.TURN_THRESHOLD_MIN; }
             _model.setTurnThreshold(v);
+        } else if (_selected == PARAM_GYRO_THRESHOLD) {
+            var v = _model.gyroThreshold - 0.1f;
+            if (v < 0.5f) { v = 0.5f; }
+            _model.setGyroThreshold(v);
         } else if (_selected == PARAM_MIN_SWIM_TIME) {
             var v = _model.minSwimTimeMs - SwimModel.MIN_SWIM_TIME_STEP;
             if (v < SwimModel.MIN_SWIM_TIME_MIN) { v = SwimModel.MIN_SWIM_TIME_MIN; }
@@ -113,25 +121,27 @@ class SettingsView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawLine(6, 22, w - 6, 22);
 
-        _drawParamRow(dc, w, 26,  PARAM_SWIM_THRESHOLD,
+        _drawParamRow(dc, w, 24,  PARAM_SWIM_THRESHOLD,
                       "Seuil nage", _model.swimThreshold.format("%.1f") + "g");
-        _drawParamRow(dc, w, 60,  PARAM_TURN_THRESHOLD,
+        _drawParamRow(dc, w, 52,  PARAM_TURN_THRESHOLD,
                       "Seuil virage", _model.turnThreshold.format("%.1f") + "g");
-        _drawParamRow(dc, w, 94,  PARAM_MIN_SWIM_TIME,
+        _drawParamRow(dc, w, 80,  PARAM_GYRO_THRESHOLD,
+                      "Seuil gyro", _model.gyroThreshold.format("%.1f") + "r/s");
+        _drawParamRow(dc, w, 108, PARAM_MIN_SWIM_TIME,
                       "Tps nage min", (_model.minSwimTimeMs / 1000.0).format("%.2f") + "s");
-        _drawParamRow(dc, w, 128, PARAM_MIN_LAP_TIME,
+        _drawParamRow(dc, w, 136, PARAM_MIN_LAP_TIME,
                       "Tps entre long.", (_model.minLapTimeMs / 1000.0).format("%.2f") + "s");
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(6, 158, w - 6, 158);
+        dc.drawLine(6, 164, w - 6, 164);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
         if (_editMode) {
-            dc.drawText(w / 2, 161, Graphics.FONT_XTINY,
+            dc.drawText(w / 2, 167, Graphics.FONT_XTINY,
                         "UP/DN:+/-  SET:valider",
                         Graphics.TEXT_JUSTIFY_CENTER);
         } else {
-            dc.drawText(w / 2, 161, Graphics.FONT_XTINY,
+            dc.drawText(w / 2, 167, Graphics.FONT_XTINY,
                         "UP/DN:nav  SET:editer",
                         Graphics.TEXT_JUSTIFY_CENTER);
         }
@@ -144,13 +154,12 @@ class SettingsView extends WatchUi.View {
         var isEditingThis = isSelected && _editMode;
 
         if (isSelected) {
-            // Couleur de fond différente selon navigation/édition
             if (isEditingThis) {
                 dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_WHITE);
             } else {
                 dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_DK_GRAY);
             }
-            dc.fillRectangle(4, y - 2, w - 8, 32);
+            dc.fillRectangle(4, y - 2, w - 8, 22);
         }
 
         if (isEditingThis) {
@@ -165,13 +174,12 @@ class SettingsView extends WatchUi.View {
         } else {
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         }
-        dc.drawText(w - 10, y + 10, Graphics.FONT_NUMBER_MILD,
+        dc.drawText(w - 10, y + 8, Graphics.FONT_NUMBER_MILD,
                     value, Graphics.TEXT_JUSTIFY_RIGHT);
     }
 }
 
-// ── Delegate Réglages ─────────────────────────────────────────────────────────
-
+// Delegate Réglages
 class SettingsDelegate extends WatchUi.BehaviorDelegate {
 
     private var _model as SwimModel;
@@ -214,7 +222,6 @@ class SettingsDelegate extends WatchUi.BehaviorDelegate {
 
     function onBack() as Boolean {
         if (_view.isEditMode()) {
-            // Sortir d'abord du mode édition avant de quitter l'écran
             _view.toggleEditMode();
             return true;
         }
