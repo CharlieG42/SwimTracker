@@ -1,6 +1,7 @@
-// DebugView.mc - v4
+// DebugView.mc - v5
 // Écran de calibration : affiche les valeurs brutes du capteur en temps réel
-// pour permettre de calibrer le seuil de détection des virages.
+// pour permettre de calibrer les seuils de détection des virages.
+// Inclut maintenant les données gyroscope pour la fusion accéléromètre/gyro.
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.WatchUi;
@@ -22,7 +23,6 @@ class DebugView extends WatchUi.View {
     function onLayout(dc as Graphics.Dc) as Void {}
 
     function onShow() as Void {
-        // Rafraîchissement rapide pour voir les valeurs évoluer en direct
         _timer.start(method(:onTimer), 250, true);
     }
 
@@ -40,44 +40,61 @@ class DebugView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
+        // Titre
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, 1, Graphics.FONT_XTINY,
-                    "DEBUG CAPTEUR", Graphics.TEXT_JUSTIFY_CENTER);
+                    "DEBUG CAPTEURS", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.drawLine(6, 14, w - 6, 14);
 
-        // Amplitudes par axe (g) — 3 lignes compactes
-        _drawRow(dc, w, 17,  "X", _model.debugAmpX);
-        _drawRow(dc, w, 34,  "Y", _model.debugAmpY);
-        _drawRow(dc, w, 51,  "Z", _model.debugAmpZ);
+        // Section Accéléromètre
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(10, 17, Graphics.FONT_XTINY, "ACCEL", Graphics.TEXT_JUSTIFY_LEFT);
+
+        _drawRow(dc, w, 28,  "X", _model.debugAmpX);
+        _drawRow(dc, w, 41,  "Y", _model.debugAmpY);
+        _drawRow(dc, w, 54,  "Z", _model.debugAmpZ);
+        _drawRow(dc, w, 67,  "MAX", _model.debugAmpMax);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(6, 70, w - 6, 70);
+        dc.drawLine(6, 78, w - 6, 78);
 
-        // Max retenu / fast / baseline / ratio
-        _drawRow(dc, w, 73,  "MAX",  _model.debugAmpMax);
-        _drawRow(dc, w, 90,  "FAST", _model.debugFastAccel);
-        _drawRow(dc, w, 107, "BASE", _model.debugBaseline);
+        // Section Gyroscope
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(10, 81, Graphics.FONT_XTINY, "GYRO", Graphics.TEXT_JUSTIFY_LEFT);
 
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(10, 124, Graphics.FONT_XTINY,
-                    "RATIO", Graphics.TEXT_JUSTIFY_LEFT);
-        dc.drawText(w - 10, 124, Graphics.FONT_SMALL,
+        _drawRow(dc, w, 92,  "GX", _model.debugGyroX);
+        _drawRow(dc, w, 105, "GY", _model.debugGyroY);
+        _drawRow(dc, w, 118, "GZ", _model.debugGyroZ);
+        _drawRow(dc, w, 131, "MAG", _model.debugGyroMag);
+        _drawRow(dc, w, 144, "SMOOTH", _model.debugSmoothedGyro);
+
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawLine(6, 155, w - 6, 155);
+
+        // Section Calculés (accel)
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(10, 158, Graphics.FONT_XTINY, "CALC", Graphics.TEXT_JUSTIFY_LEFT);
+
+        _drawRow(dc, w, 169, "FAST", _model.debugFastAccel);
+        _drawRow(dc, w, 182, "BASE", _model.debugBaseline);
+        dc.drawText(10, 195, Graphics.FONT_XTINY, "RATIO", Graphics.TEXT_JUSTIFY_LEFT);
+        dc.drawText(w - 10, 195, Graphics.FONT_SMALL,
                     _model.debugRatio.format("%.2f"), Graphics.TEXT_JUSTIFY_RIGHT);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(6, 144, w - 6, 144);
+        dc.drawLine(6, 206, w - 6, 206);
 
-        // Min/Max observés depuis le début — utiles pour calibrer le seuil
+        // Min/Max observés
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, 147, Graphics.FONT_XTINY,
-                    "Min:" + _model.debugMinAmpEver.format("%.2f")
+        dc.drawText(w / 2, 209, Graphics.FONT_XTINY,
+                    "Amp Min:" + _model.debugMinAmpEver.format("%.2f")
                     + " Max:" + _model.debugMaxAmpEver.format("%.2f"),
                     Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, 161, Graphics.FONT_XTINY,
+        dc.drawText(w / 2, 223, Graphics.FONT_XTINY,
                     "BCK: retour",
                     Graphics.TEXT_JUSTIFY_CENTER);
     }
@@ -92,8 +109,7 @@ class DebugView extends WatchUi.View {
     }
 }
 
-// ── Delegate Debug ─────────────────────────────────────────────────────────────
-
+// Delegate Debug
 class DebugDelegate extends WatchUi.BehaviorDelegate {
 
     function initialize() {
