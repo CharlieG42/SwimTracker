@@ -366,9 +366,9 @@ class SwimModel {
 
         var gyroMag = 0.0f;
         if (gyroData != null) {
-            var gx = _getMaxAmplitude(gyroData.x) / 1000.0f;
-            var gy = _getMaxAmplitude(gyroData.y) / 1000.0f;
-            var gz = _getMaxAmplitude(gyroData.z) / 1000.0f;
+            var gx = _getMaxAmplitudeFromFloatArray(gyroData.x) / 1000.0f;
+            var gy = _getMaxAmplitudeFromFloatArray(gyroData.y) / 1000.0f;
+            var gz = _getMaxAmplitudeFromFloatArray(gyroData.z) / 1000.0f;
             gyroMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
             
             debugGyroX = gx;
@@ -456,6 +456,18 @@ class SwimModel {
         var minVal = samples[0].toFloat();
         for (var i = 1; i < samples.size(); i++) {
             var v = samples[i].toFloat();
+            if (v > maxVal) { maxVal = v; }
+            if (v < minVal) { minVal = v; }
+        }
+        return maxVal - minVal;
+    }
+
+    private function _getMaxAmplitudeFromFloatArray(samples as Array<Float>?) as Float {
+        if (samples == null || samples.size() == 0) { return 0.0f; }
+        var maxVal = samples[0];
+        var minVal = samples[0];
+        for (var i = 1; i < samples.size(); i++) {
+            var v = samples[i];
             if (v > maxVal) { maxVal = v; }
             if (v < minVal) { minVal = v; }
         }
