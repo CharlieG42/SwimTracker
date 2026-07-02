@@ -340,10 +340,15 @@ class SwimModel {
 
     private function _startSensors() as Void {
         var options = {
-            :period              => 1,
-            :sampleRate          => ACCEL_SAMPLE_RATE,
-            :enableAccelerometer => true,
-            :gyroscope           => true
+            :period => 1,
+            :accelerometer => {
+                :enabled => true,
+                :sampleRate => ACCEL_SAMPLE_RATE
+            },
+            :gyroscope => {
+                :enabled => true,
+                :sampleRate => ACCEL_SAMPLE_RATE
+            }
         };
         Sensor.registerSensorDataListener(method(:onSensorData), options);
     }
