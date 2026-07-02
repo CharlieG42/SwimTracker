@@ -1,7 +1,7 @@
-// SwimModel.mc - v5
+// SwimModel.mc - v5.1
 // Modèle de données principal + détection des longueurs via accéléromètre + gyroscope
 // Détection par CREUX d'amplitude + PIC de rotation (fusion accéléromètre/gyroscope)
-// Seuils et délais réglables sans recompilation via Application.Properties
+// Avec protections contre les null pointers et crashs
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.Lang;
@@ -208,6 +208,11 @@ class SwimModel {
         };
         _session = ActivityRecording.createSession(options);
 
+        if (_session == null) {
+            state = STATE_FINISHED;
+            return;
+        }
+
         _distanceField = _session.createField(
             "pool_distance_m", 0, FitContributor.DATA_TYPE_FLOAT,
             { :mesgType => FitContributor.MESG_TYPE_SESSION, :units => "meters" }
@@ -256,6 +261,9 @@ class SwimModel {
         isRecording     = true;
 
         _loadDetectionSettings();
+        
+        // Désenregistrer un éventuel listener existant avant d'en créer un nouveau
+        Sensor.unregisterSensorDataListener();
         _startSensors();
         WatchUi.requestUpdate();
     }
@@ -277,6 +285,9 @@ class SwimModel {
         }
         _pauseStartTime = null;
         state = STATE_ACTIVE;
+        
+        // Désenregistrer avant de réenregistrer
+        Sensor.unregisterSensorDataListener();
         _startSensors();
         WatchUi.requestUpdate();
     }
@@ -355,6 +366,9 @@ class SwimModel {
 
     function onSensorData(sensorData as Sensor.SensorData) as Void {
         if (state != STATE_ACTIVE) { return; }
+        
+        // Vérification de base
+        if (sensorData == null) { return; }
 
         var accelData = sensorData.accelerometerData;
         var gyroData = sensorData.gyroscopeData;
@@ -374,7 +388,11 @@ class SwimModel {
             var gx = _getMaxAmplitudeFromFloatArray(gyroData.x) / 1000.0f;
             var gy = _getMaxAmplitudeFromFloatArray(gyroData.y) / 1000.0f;
             var gz = _getMaxAmplitudeFromFloatArray(gyroData.z) / 1000.0f;
-            gyroMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
+            
+            // Protection contre les valeurs NaN/Infinite
+            if (!gx.isNaN() && !gy.isNaN() && !gz.isNaN()) {
+                gyroMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
+            }
             
             debugGyroX = gx;
             debugGyroY = gy;
@@ -497,8 +515,8 @@ class SwimModel {
     }
 
     private function _recordLap() as Void {
-        lapCount       += 1;
-        totalDistanceM  = lapCount * getPoolLength();
+        lapCount += 1;
+        totalDistanceM = lapCount * getPoolLength();
 
         if (_distanceField != null) {
             _distanceField.setData(totalDistanceM.toFloat());
@@ -516,6 +534,12 @@ class SwimModel {
             if (lapDurationMs > 0) {
                 var secPerLength = lapDurationMs / 1000.0f;
                 var secPer100m   = (secPerLength / getPoolLength()) * 100.0f;
+                
+                // Protection : s'assurer que _lapTimes existe
+                if (_lapTimes == null) {
+                    _lapTimes = [] as Array<Number>;
+                }
+                
                 _lapTimes.add(secPer100m.toNumber());
                 if (_lapTimes.size() > 3) {
                     _lapTimes = _lapTimes.slice(1, null);
