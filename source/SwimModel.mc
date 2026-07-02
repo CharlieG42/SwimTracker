@@ -1,7 +1,7 @@
 // SwimModel.mc - v5.1
 // Modèle de données principal + détection des longueurs via accéléromètre + gyroscope
 // Détection par CREUX d'amplitude + PIC de rotation (fusion accéléromètre/gyroscope)
-// Avec protections contre les null pointers et crashs
+// Avec protections contre les crashs
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.Lang;
@@ -389,8 +389,8 @@ class SwimModel {
             var gy = _getMaxAmplitudeFromFloatArray(gyroData.y) / 1000.0f;
             var gz = _getMaxAmplitudeFromFloatArray(gyroData.z) / 1000.0f;
             
-            // Protection contre les valeurs NaN/Infinite
-            if (!gx.isNaN() && !gy.isNaN() && !gz.isNaN()) {
+            // Protection contre les valeurs NaN (NaN != NaN en Monkey C)
+            if (gx == gx && gy == gy && gz == gz) {
                 gyroMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
             }
             
