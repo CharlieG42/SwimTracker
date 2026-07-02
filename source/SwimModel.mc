@@ -1,7 +1,6 @@
-// SwimModel.mc - v5.1
-// Modèle de données principal + détection des longueurs via accéléromètre + gyroscope
-// Détection par CREUX d'amplitude + PIC de rotation (fusion accéléromètre/gyroscope)
-// Avec protections contre les crashs
+// SwimModel.mc - v5.2
+// Version ultra-stable : uniquement accéléromètre (sans gyroscope)
+// Pour tester si le problème vient du gyroscope
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.Lang;
@@ -36,12 +35,6 @@ class SwimModel {
     private const FAST_SMOOTHING            as Float  = 0.3f;
     private const BASELINE_SMOOTHING        as Float  = 0.05f;
 
-    private const DEFAULT_GYRO_THRESHOLD    as Float  = 2.0f;
-    private const DEFAULT_GYRO_SMOOTHING    as Float  = 0.2f;
-    private const GYRO_THRESHOLD_MIN        as Float  = 0.5f;
-    private const GYRO_THRESHOLD_MAX        as Float  = 5.0f;
-    private const GYRO_THRESHOLD_STEP       as Float  = 0.1f;
-
     static const SWIM_THRESHOLD_MIN  as Float = 0.5f;
     static const SWIM_THRESHOLD_MAX  as Float = 3.0f;
     static const SWIM_THRESHOLD_STEP as Float = 0.1f;
@@ -67,7 +60,6 @@ class SwimModel {
     var turnThreshold  as Float  = DEFAULT_TURN_THRESHOLD;
     var minSwimTimeMs  as Number = DEFAULT_MIN_SWIM_TIME_MS;
     var minLapTimeMs   as Number = DEFAULT_MIN_LAP_TIME_MS;
-    var gyroThreshold  as Float  = DEFAULT_GYRO_THRESHOLD;
 
     private var _session        as ActivityRecording.Session?;
     private var _startTime      as Time.Moment?;
@@ -81,8 +73,6 @@ class SwimModel {
     private var _swimStartMs    as Number  = 0;
     private var _lapTimes       as Array<Number>;
     private var _lastLapStartMs as Number  = 0;
-    private var _gyroMagnitude  as Float   = 0.0f;
-    private var _smoothedGyro   as Float   = 0.0f;
 
     var strokeCountPeaks    as Number = 0;
     var strokeCountEstimate as Number = 0;
@@ -98,18 +88,12 @@ class SwimModel {
     var debugRatio       as Float = 0.0f;
     var debugMaxAmpEver  as Float = 0.0f;
     var debugMinAmpEver  as Float = 999.0f;
-    var debugGyroX       as Float = 0.0f;
-    var debugGyroY       as Float = 0.0f;
-    var debugGyroZ       as Float = 0.0f;
-    var debugGyroMag     as Float = 0.0f;
-    var debugSmoothedGyro as Float = 0.0f;
 
     private var _distanceField    as FitContributor.Field?;
     private var _lapDistanceField as FitContributor.Field?;
     private var _debugAmpField    as FitContributor.Field?;
     private var _debugRatioField  as FitContributor.Field?;
     private var _debugTurnField   as FitContributor.Field?;
-    private var _debugGyroField   as FitContributor.Field?;
 
     function initialize() {
         _lapTimes = [] as Array<Number>;
@@ -130,8 +114,6 @@ class SwimModel {
         minSwimTimeMs = (v != null) ? (v as Number) : DEFAULT_MIN_SWIM_TIME_MS;
         v = Application.Storage.getValue("minLapTimeMs");
         minLapTimeMs = (v != null) ? (v as Number) : DEFAULT_MIN_LAP_TIME_MS;
-        v = Application.Storage.getValue("gyroThreshold");
-        gyroThreshold = (v != null) ? (v as Float) : DEFAULT_GYRO_THRESHOLD;
     }
 
     function setSwimThreshold(val as Float) as Void {
@@ -154,17 +136,11 @@ class SwimModel {
         Application.Storage.setValue("minLapTimeMs", val);
     }
 
-    function setGyroThreshold(val as Float) as Void {
-        gyroThreshold = val;
-        Application.Storage.setValue("gyroThreshold", val);
-    }
-
     function resetDetectionSettingsToDefaults() as Void {
         setSwimThreshold(DEFAULT_SWIM_THRESHOLD);
         setTurnThreshold(DEFAULT_TURN_THRESHOLD);
         setMinSwimTimeMs(DEFAULT_MIN_SWIM_TIME_MS);
         setMinLapTimeMs(DEFAULT_MIN_LAP_TIME_MS);
-        setGyroThreshold(DEFAULT_GYRO_THRESHOLD);
     }
 
     function getPoolLength() as Number {
@@ -233,10 +209,6 @@ class SwimModel {
             "debug_turn_detected", 3, FitContributor.DATA_TYPE_UINT8,
             { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => "bool" }
         );
-        _debugGyroField = _session.createField(
-            "debug_gyro_mag", 5, FitContributor.DATA_TYPE_FLOAT,
-            { :mesgType => FitContributor.MESG_TYPE_RECORD, :units => "rad/s" }
-        );
 
         _session.start();
         _startTime      = Time.now();
@@ -252,8 +224,6 @@ class SwimModel {
         _lastPeakMs     = 0;
         _isSwimming     = false;
         _swimStartMs    = 0;
-        _gyroMagnitude  = 0.0f;
-        _smoothedGyro   = 0.0f;
         strokeCountPeaks    = 0;
         strokeCountEstimate = 0;
         _lastStrokeEstimateMs = 0;
@@ -308,7 +278,6 @@ class SwimModel {
                 _debugAmpField    = null;
                 _debugRatioField  = null;
                 _debugTurnField   = null;
-                _debugGyroField   = null;
             }
         }
         isRecording = false;
@@ -330,7 +299,6 @@ class SwimModel {
                 _debugAmpField    = null;
                 _debugRatioField  = null;
                 _debugTurnField   = null;
-                _debugGyroField   = null;
             }
         }
         isRecording = false;
@@ -355,10 +323,6 @@ class SwimModel {
             :accelerometer => {
                 :enabled => true,
                 :sampleRate => ACCEL_SAMPLE_RATE
-            },
-            :gyroscope => {
-                :enabled => true,
-                :sampleRate => ACCEL_SAMPLE_RATE
             }
         };
         Sensor.registerSensorDataListener(method(:onSensorData), options);
@@ -371,7 +335,6 @@ class SwimModel {
         if (sensorData == null) { return; }
 
         var accelData = sensorData.accelerometerData;
-        var gyroData = sensorData.gyroscopeData;
         
         if (accelData == null) { return; }
 
@@ -382,26 +345,6 @@ class SwimModel {
         var amplitude = ampX;
         if (ampY > amplitude) { amplitude = ampY; }
         if (ampZ > amplitude) { amplitude = ampZ; }
-
-        var gyroMag = 0.0f;
-        if (gyroData != null) {
-            var gx = _getMaxAmplitudeFromFloatArray(gyroData.x) / 1000.0f;
-            var gy = _getMaxAmplitudeFromFloatArray(gyroData.y) / 1000.0f;
-            var gz = _getMaxAmplitudeFromFloatArray(gyroData.z) / 1000.0f;
-            
-            // Protection contre les valeurs NaN (NaN != NaN en Monkey C)
-            if (gx == gx && gy == gy && gz == gz) {
-                gyroMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
-            }
-            
-            debugGyroX = gx;
-            debugGyroY = gy;
-            debugGyroZ = gz;
-        }
-        debugGyroMag = gyroMag;
-        
-        _smoothedGyro = _smoothedGyro * (1.0f - DEFAULT_GYRO_SMOOTHING) + gyroMag * DEFAULT_GYRO_SMOOTHING;
-        debugSmoothedGyro = _smoothedGyro;
 
         debugAmpX   = ampX;
         debugAmpY   = ampY;
@@ -427,9 +370,6 @@ class SwimModel {
         if (_debugTurnField != null) {
             _debugTurnField.setData(0);
         }
-        if (_debugGyroField != null) {
-            _debugGyroField.setData(gyroMag);
-        }
 
         if (elapsedMs - _lastStrokeEstimateMs >= STROKE_ESTIMATE_INTERVAL_MS) {
             _lastStrokeEstimateMs = elapsedMs;
@@ -449,6 +389,7 @@ class SwimModel {
                 _swimStartMs = 0;
             }
         } else {
+            // En nage active — compter les mouvements de bras (pics)
             if (!_peakDetected && amplitude > swimThreshold * 1.3f) {
                 _peakDetected = true;
                 strokeCountPeaks += 1;
@@ -456,35 +397,19 @@ class SwimModel {
                 _peakDetected = false;
             }
 
-            if (gyroData != null && _smoothedGyro > gyroThreshold) {
-                if (_fastAccel < turnThreshold) {
-                    _isSwimming   = false;
-                    _swimStartMs  = 0;
-                    _peakDetected = false;
+            // Détection de virage par creux d'amplitude (sans gyroscope)
+            if (_fastAccel < turnThreshold) {
+                _isSwimming   = false;
+                _swimStartMs  = 0;
+                _peakDetected = false;
 
-                    var timeSinceLastLap = elapsedMs - _lastPeakMs;
-                    if (timeSinceLastLap >= minLapTimeMs) {
-                        _lastPeakMs = elapsedMs;
-                        if (_debugTurnField != null) {
-                            _debugTurnField.setData(1);
-                        }
-                        _recordLap();
+                var timeSinceLastLap = elapsedMs - _lastPeakMs;
+                if (timeSinceLastLap >= minLapTimeMs) {
+                    _lastPeakMs = elapsedMs;
+                    if (_debugTurnField != null) {
+                        _debugTurnField.setData(1);
                     }
-                }
-            } else if (gyroData == null) {
-                if (_fastAccel < turnThreshold) {
-                    _isSwimming   = false;
-                    _swimStartMs  = 0;
-                    _peakDetected = false;
-
-                    var timeSinceLastLap = elapsedMs - _lastPeakMs;
-                    if (timeSinceLastLap >= minLapTimeMs) {
-                        _lastPeakMs = elapsedMs;
-                        if (_debugTurnField != null) {
-                            _debugTurnField.setData(1);
-                        }
-                        _recordLap();
-                    }
+                    _recordLap();
                 }
             }
         }
@@ -496,18 +421,6 @@ class SwimModel {
         var minVal = samples[0].toFloat();
         for (var i = 1; i < samples.size(); i++) {
             var v = samples[i].toFloat();
-            if (v > maxVal) { maxVal = v; }
-            if (v < minVal) { minVal = v; }
-        }
-        return maxVal - minVal;
-    }
-
-    private function _getMaxAmplitudeFromFloatArray(samples as Array<Float>?) as Float {
-        if (samples == null || samples.size() == 0) { return 0.0f; }
-        var maxVal = samples[0];
-        var minVal = samples[0];
-        for (var i = 1; i < samples.size(); i++) {
-            var v = samples[i];
             if (v > maxVal) { maxVal = v; }
             if (v < minVal) { minVal = v; }
         }
@@ -609,8 +522,6 @@ class SwimModel {
         _swimStartMs          = 0;
         _peakDetected         = false;
         _lastPeakMs           = 0;
-        _gyroMagnitude        = 0.0f;
-        _smoothedGyro         = 0.0f;
         debugAmpX             = 0.0f;
         debugAmpY             = 0.0f;
         debugAmpZ             = 0.0f;
@@ -620,10 +531,5 @@ class SwimModel {
         debugRatio            = 0.0f;
         debugMaxAmpEver       = 0.0f;
         debugMinAmpEver       = 999.0f;
-        debugGyroX            = 0.0f;
-        debugGyroY            = 0.0f;
-        debugGyroZ            = 0.0f;
-        debugGyroMag          = 0.0f;
-        debugSmoothedGyro    = 0.0f;
     }
 }
