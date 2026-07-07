@@ -1,6 +1,6 @@
-// SwimModel.mc - v5.3
-// Modèle de données principal + détection des longueurs via accéléromètre
-// Correction : ajout de poolLength obligatoire pour SPORT_SWIMMING + SUB_SPORT_LAP_SWIMMING
+// SwimModel.mc - v5.2
+// Version ultra-stable : uniquement accéléromètre (sans gyroscope)
+// Pour tester si le problème vient du gyroscope
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.Lang;
@@ -178,10 +178,10 @@ class SwimModel {
         if (state != STATE_READY && state != STATE_SETUP) { return; }
 
         var options = {
-            :name      => "Natation Piscine",
-            :sport     => Activity.SPORT_SWIMMING,
-            :subSport  => Activity.SUB_SPORT_LAP_SWIMMING,
-            :poolLength => getPoolLength()  // FIX: Champ obligatoire pour la natation
+            :name       => "Natation Piscine",
+            :sport      => Activity.SPORT_SWIMMING,
+            :subSport   => Activity.SUB_SPORT_LAP_SWIMMING,
+            :poolLength => getPoolLength().toFloat()
         };
         _session = ActivityRecording.createSession(options);
 
