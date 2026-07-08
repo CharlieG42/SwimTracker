@@ -92,7 +92,8 @@ class DebugView extends WatchUi.View {
     }
 }
 
-// Delegate Debug
+// ── Delegate Debug ─────────────────────────────────────────────────────────────
+
 class DebugDelegate extends WatchUi.BehaviorDelegate {
 
     function initialize() {

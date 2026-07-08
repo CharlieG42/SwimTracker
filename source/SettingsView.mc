@@ -144,6 +144,7 @@ class SettingsView extends WatchUi.View {
         var isEditingThis = isSelected && _editMode;
 
         if (isSelected) {
+            // Couleur de fond différente selon navigation/édition
             if (isEditingThis) {
                 dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_WHITE);
             } else {
@@ -169,7 +170,8 @@ class SettingsView extends WatchUi.View {
     }
 }
 
-// Delegate Réglages
+// ── Delegate Réglages ─────────────────────────────────────────────────────────
+
 class SettingsDelegate extends WatchUi.BehaviorDelegate {
 
     private var _model as SwimModel;
@@ -212,6 +214,7 @@ class SettingsDelegate extends WatchUi.BehaviorDelegate {
 
     function onBack() as Boolean {
         if (_view.isEditMode()) {
+            // Sortir d'abord du mode édition avant de quitter l'écran
             _view.toggleEditMode();
             return true;
         }

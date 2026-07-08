@@ -1,6 +1,7 @@
-// SwimModel.mc - v5.2
-// Version ultra-stable : uniquement accéléromètre (sans gyroscope)
-// Pour tester si le problème vient du gyroscope
+// SwimModel.mc - v4
+// Modèle de données principal + détection des longueurs via accéléromètre
+// Détection par CREUX d'amplitude (calibrée sur données FIT réelles)
+// Seuils et délais réglables sans recompilation via Application.Properties
 // Compatible Connect IQ SDK 9.1.0
 
 import Toybox.Lang;
@@ -27,35 +28,36 @@ class SwimModel {
         STATE_FINISHED
     }
 
-    // ── DIAGNOSTIC ────────────────────────────────────────────────────────────
-    // Si le crash persiste ~2-3s après le lancement, il est possible que
-    // SUB_SPORT_LAP_SWIMMING active l'algorithme natif de nage de Garmin,
-    // qui entre en conflit avec notre propre lecture accéléromètre.
-    // Passer ce flag à true pour tester en SPORT_GENERIC (désactive l'algo
-    // natif) : si le crash disparaît, l'hypothèse est confirmée.
-    private const DIAG_USE_GENERIC_SPORT as Boolean = false;
-
+    // ── Paramètres détection — VALEURS PAR DÉFAUT ────────────────────────────
+    // Ces valeurs servent de filet de sécurité si aucune valeur n'est stockée.
+    // Les valeurs réellement utilisées sont chargées depuis Application.Storage
+    // et réglables via l'écran Réglages (SettingsView) sans recompilation.
     private const ACCEL_SAMPLE_RATE         as Number = 25;
-    private const DEFAULT_SWIM_THRESHOLD    as Float  = 1.5f;
-    private const DEFAULT_TURN_THRESHOLD    as Float  = 1.5f;
-    private const DEFAULT_MIN_SWIM_TIME_MS  as Number = 500;
-    private const DEFAULT_MIN_LAP_TIME_MS   as Number = 1200;
+    private const DEFAULT_SWIM_THRESHOLD    as Float  = 1.5f;  // g - au-dessus = nage active
+    private const DEFAULT_TURN_THRESHOLD    as Float  = 1.5f;  // g - en-dessous = virage/repos
+    private const DEFAULT_MIN_SWIM_TIME_MS  as Number = 500;   // ms de nage avant de pouvoir détecter
+    private const DEFAULT_MIN_LAP_TIME_MS   as Number = 1200;  // ms minimum entre deux longueurs
     private const FAST_SMOOTHING            as Float  = 0.3f;
     private const BASELINE_SMOOTHING        as Float  = 0.05f;
 
+    // Bornes acceptées pour le réglage utilisateur (utilisées par SettingsView)
     static const SWIM_THRESHOLD_MIN  as Float = 0.5f;
     static const SWIM_THRESHOLD_MAX  as Float = 3.0f;
     static const SWIM_THRESHOLD_STEP as Float = 0.1f;
+
     static const TURN_THRESHOLD_MIN  as Float = 0.3f;
     static const TURN_THRESHOLD_MAX  as Float = 1.5f;
     static const TURN_THRESHOLD_STEP as Float = 0.1f;
+
     static const MIN_SWIM_TIME_MIN  as Number = 500;
     static const MIN_SWIM_TIME_MAX  as Number = 5000;
     static const MIN_SWIM_TIME_STEP as Number = 250;
+
     static const MIN_LAP_TIME_MIN  as Number = 1000;
     static const MIN_LAP_TIME_MAX  as Number = 10000;
     static const MIN_LAP_TIME_STEP as Number = 250;
 
+    // ── Propriétés publiques ──────────────────────────────────────────────────
     var state                 as ActivityState = STATE_SETUP;
     var poolLengthIdx         as Number  = DEFAULT_POOL_LENGTH_IDX;
     var lapCount              as Number  = 0;
@@ -64,11 +66,13 @@ class SwimModel {
     var currentPaceSecPer100m as Number  = 0;
     var isRecording           as Boolean = false;
 
+    // Paramètres de détection actifs (chargés/sauvegardés via Storage)
     var swimThreshold  as Float  = DEFAULT_SWIM_THRESHOLD;
     var turnThreshold  as Float  = DEFAULT_TURN_THRESHOLD;
     var minSwimTimeMs  as Number = DEFAULT_MIN_SWIM_TIME_MS;
     var minLapTimeMs   as Number = DEFAULT_MIN_LAP_TIME_MS;
 
+    // ── Propriétés privées ────────────────────────────────────────────────────
     private var _session        as ActivityRecording.Session?;
     private var _startTime      as Time.Moment?;
     private var _pauseStartTime as Time.Moment?;
@@ -82,11 +86,13 @@ class SwimModel {
     private var _lapTimes       as Array<Number>;
     private var _lastLapStartMs as Number  = 0;
 
+    // Compteurs de mouvements (coups de bras)
     var strokeCountPeaks    as Number = 0;
     var strokeCountEstimate as Number = 0;
     private var _lastStrokeEstimateMs as Number = 0;
     private const STROKE_ESTIMATE_INTERVAL_MS as Number = 1500;
 
+    // ── Champs DEBUG — valeurs brutes exposées pour calibration ───────────────
     var debugAmpX        as Float = 0.0f;
     var debugAmpY        as Float = 0.0f;
     var debugAmpZ        as Float = 0.0f;
@@ -97,6 +103,7 @@ class SwimModel {
     var debugMaxAmpEver  as Float = 0.0f;
     var debugMinAmpEver  as Float = 999.0f;
 
+    // Champs FIT
     private var _distanceField    as FitContributor.Field?;
     private var _lapDistanceField as FitContributor.Field?;
     private var _debugAmpField    as FitContributor.Field?;
@@ -112,14 +119,20 @@ class SwimModel {
         _loadDetectionSettings();
     }
 
+    // ── Chargement / sauvegarde des réglages de détection ────────────────────
+
     private function _loadDetectionSettings() as Void {
         var v;
+
         v = Application.Storage.getValue("swimThreshold");
         swimThreshold = (v != null) ? (v as Float) : DEFAULT_SWIM_THRESHOLD;
+
         v = Application.Storage.getValue("turnThreshold");
         turnThreshold = (v != null) ? (v as Float) : DEFAULT_TURN_THRESHOLD;
+
         v = Application.Storage.getValue("minSwimTimeMs");
         minSwimTimeMs = (v != null) ? (v as Number) : DEFAULT_MIN_SWIM_TIME_MS;
+
         v = Application.Storage.getValue("minLapTimeMs");
         minLapTimeMs = (v != null) ? (v as Number) : DEFAULT_MIN_LAP_TIME_MS;
     }
@@ -151,27 +164,10 @@ class SwimModel {
         setMinLapTimeMs(DEFAULT_MIN_LAP_TIME_MS);
     }
 
+    // ── Getters ───────────────────────────────────────────────────────────────
+
     function getPoolLength() as Number {
         return POOL_LENGTHS[poolLengthIdx];
-    }
-
-    // Capture la dernière erreur Monkey C rencontrée (visible via lastCrashInfo())
-    // pour pouvoir diagnostiquer sans branchement debugger.
-    private function _logCrash(msg as String) as Void {
-        Application.Storage.setValue("lastError", msg);
-        Application.Storage.setValue("lastErrorElapsedMs", elapsedMs);
-    }
-
-    function lastCrashInfo() as String {
-        var msg = Application.Storage.getValue("lastError");
-        var ms  = Application.Storage.getValue("lastErrorElapsedMs");
-        if (msg == null) { return "Aucune erreur enregistree"; }
-        return msg.toString() + " @ " + (ms != null ? ms.toString() : "?") + "ms";
-    }
-
-    function clearCrashInfo() as Void {
-        Application.Storage.deleteValue("lastError");
-        Application.Storage.deleteValue("lastErrorElapsedMs");
     }
 
     function getFormattedPace() as String {
@@ -201,44 +197,24 @@ class SwimModel {
         return totalDistanceM.format("%d") + " m";
     }
 
+    // ── Contrôle activité ─────────────────────────────────────────────────────
+
     function startActivity() as Void {
         if (state != STATE_READY && state != STATE_SETUP) { return; }
 
-        clearCrashInfo();
+        var options = {
+            :name     => "Natation Piscine",
+            :sport    => Activity.SPORT_SWIMMING,
+            :subSport => Activity.SUB_SPORT_LAP_SWIMMING
+        };
+        _session = ActivityRecording.createSession(options);
 
-        var options;
-        if (DIAG_USE_GENERIC_SPORT) {
-            // Version diagnostic : pas d'algo natif de nage, pas de :poolLength requis
-            options = {
-                :name     => "Natation Piscine (diag)",
-                :sport    => Activity.SPORT_GENERIC,
-                :subSport => Activity.SUB_SPORT_GENERIC
-            };
-        } else {
-            options = {
-                :name       => "Natation Piscine",
-                :sport      => Activity.SPORT_SWIMMING,
-                :subSport   => Activity.SUB_SPORT_LAP_SWIMMING,
-                :poolLength => getPoolLength().toFloat()
-            };
-        }
-
-        try {
-            _session = ActivityRecording.createSession(options);
-        } catch (ex) {
-            _logCrash("createSession: " + ex.getErrorMessage());
-            _session = null;
-        }
-
-        if (_session == null) {
-            state = STATE_FINISHED;
-            return;
-        }
-
+        // Champ distance en session (résumé final)
         _distanceField = _session.createField(
             "pool_distance_m", 0, FitContributor.DATA_TYPE_FLOAT,
             { :mesgType => FitContributor.MESG_TYPE_SESSION, :units => "meters" }
         );
+        // Champ distance par longueur (lap) — utilisé pour la distance native Garmin
         _lapDistanceField = _session.createField(
             "lap_distance_m", 4, FitContributor.DATA_TYPE_FLOAT,
             { :mesgType => FitContributor.MESG_TYPE_LAP, :units => "meters" }
@@ -276,11 +252,11 @@ class SwimModel {
         state           = STATE_ACTIVE;
         isRecording     = true;
 
+        // Recharger les réglages au cas où ils auraient été modifiés
+        // dans l'écran Réglages depuis le dernier chargement
         _loadDetectionSettings();
-        
-        // Désenregistrer un éventuel listener existant avant d'en créer un nouveau
-        Sensor.unregisterSensorDataListener();
-        _startSensors();
+
+        _startAccelerometer();
         WatchUi.requestUpdate();
     }
 
@@ -301,10 +277,7 @@ class SwimModel {
         }
         _pauseStartTime = null;
         state = STATE_ACTIVE;
-        
-        // Désenregistrer avant de réenregistrer
-        Sensor.unregisterSensorDataListener();
-        _startSensors();
+        _startAccelerometer();
         WatchUi.requestUpdate();
     }
 
@@ -363,31 +336,24 @@ class SwimModel {
         _recordLap();
     }
 
-    private function _startSensors() as Void {
+    // ── Accéléromètre ─────────────────────────────────────────────────────────
+
+    private function _startAccelerometer() as Void {
         var options = {
-            :period => 1,
-            :accelerometer => {
-                :enabled => true,
-                :sampleRate => ACCEL_SAMPLE_RATE
-            }
+            :period              => 1,
+            :sampleRate          => ACCEL_SAMPLE_RATE,
+            :enableAccelerometer => true
         };
-        try {
-            Sensor.registerSensorDataListener(method(:onSensorData), options);
-        } catch (ex) {
-            _logCrash("registerSensorDataListener: " + ex.getErrorMessage());
-        }
+        Sensor.registerSensorDataListener(method(:onSensorData), options);
     }
 
     function onSensorData(sensorData as Sensor.SensorData) as Void {
         if (state != STATE_ACTIVE) { return; }
-        
-        // Vérification de base
-        if (sensorData == null) { return; }
 
         var accelData = sensorData.accelerometerData;
-        
         if (accelData == null) { return; }
 
+        // ── Amplitude sur 3 axes ──────────────────────────────────────────────
         var ampX = _getMaxAmplitude(accelData.x) / 1000.0f;
         var ampY = _getMaxAmplitude(accelData.y) / 1000.0f;
         var ampZ = _getMaxAmplitude(accelData.z) / 1000.0f;
@@ -396,6 +362,7 @@ class SwimModel {
         if (ampY > amplitude) { amplitude = ampY; }
         if (ampZ > amplitude) { amplitude = ampZ; }
 
+        // ── Exposition DEBUG ──────────────────────────────────────────────────
         debugAmpX   = ampX;
         debugAmpY   = ampY;
         debugAmpZ   = ampZ;
@@ -403,6 +370,7 @@ class SwimModel {
         if (amplitude > debugMaxAmpEver) { debugMaxAmpEver = amplitude; }
         if (amplitude < debugMinAmpEver) { debugMinAmpEver = amplitude; }
 
+        // ── Deux moyennes glissantes ──────────────────────────────────────────
         _fastAccel     = _fastAccel     * (1.0f - FAST_SMOOTHING)     + amplitude * FAST_SMOOTHING;
         _baselineAccel = _baselineAccel * (1.0f - BASELINE_SMOOTHING) + amplitude * BASELINE_SMOOTHING;
         debugFastAccel = _fastAccel;
@@ -411,6 +379,7 @@ class SwimModel {
 
         updateElapsedTime();
 
+        // ── Écriture FIT debug à chaque échantillon ───────────────────────────
         if (_debugAmpField != null) {
             _debugAmpField.setData(amplitude);
         }
@@ -421,51 +390,53 @@ class SwimModel {
             _debugTurnField.setData(0);
         }
 
+        // ── Compteur de mouvements (estimation temporelle) ────────────────────
         if (elapsedMs - _lastStrokeEstimateMs >= STROKE_ESTIMATE_INTERVAL_MS) {
             _lastStrokeEstimateMs = elapsedMs;
             strokeCountEstimate += 1;
         }
 
+        // Attendre la fin de la phase initiale (le temps que baseline démarre)
         if (elapsedMs < 2000) { return; }
 
-        try {
-            if (!_isSwimming) {
-                if (_fastAccel >= swimThreshold) {
-                    if (_swimStartMs == 0) {
-                        _swimStartMs = elapsedMs;
-                    } else if (elapsedMs - _swimStartMs >= minSwimTimeMs) {
-                        _isSwimming = true;
-                    }
-                } else {
-                    _swimStartMs = 0;
+        // ── Détection par CREUX d'amplitude (machine à états) ─────────────────
+        //   REPOS → (amp >= swimThreshold pendant minSwimTimeMs) → NAGE ACTIVE
+        //   NAGE ACTIVE → (amp < turnThreshold) → VIRAGE DÉTECTÉ → REPOS
+
+        if (!_isSwimming) {
+            if (_fastAccel >= swimThreshold) {
+                if (_swimStartMs == 0) {
+                    _swimStartMs = elapsedMs;
+                } else if (elapsedMs - _swimStartMs >= minSwimTimeMs) {
+                    _isSwimming = true;
                 }
             } else {
-                // En nage active — compter les mouvements de bras (pics)
-                if (!_peakDetected && amplitude > swimThreshold * 1.3f) {
-                    _peakDetected = true;
-                    strokeCountPeaks += 1;
-                } else if (_peakDetected && amplitude < swimThreshold) {
-                    _peakDetected = false;
-                }
+                _swimStartMs = 0;
+            }
+        } else {
+            // En nage active — compter les mouvements de bras (pics)
+            if (!_peakDetected && amplitude > swimThreshold * 1.3f) {
+                _peakDetected = true;
+                strokeCountPeaks += 1;
+            } else if (_peakDetected && amplitude < swimThreshold) {
+                _peakDetected = false;
+            }
 
-                // Détection de virage par creux d'amplitude (sans gyroscope)
-                if (_fastAccel < turnThreshold) {
-                    _isSwimming   = false;
-                    _swimStartMs  = 0;
-                    _peakDetected = false;
+            // Chercher la chute d'amplitude → virage
+            if (_fastAccel < turnThreshold) {
+                _isSwimming   = false;
+                _swimStartMs  = 0;
+                _peakDetected = false;
 
-                    var timeSinceLastLap = elapsedMs - _lastPeakMs;
-                    if (timeSinceLastLap >= minLapTimeMs) {
-                        _lastPeakMs = elapsedMs;
-                        if (_debugTurnField != null) {
-                            _debugTurnField.setData(1);
-                        }
-                        _recordLap();
+                var timeSinceLastLap = elapsedMs - _lastPeakMs;
+                if (timeSinceLastLap >= minLapTimeMs) {
+                    _lastPeakMs = elapsedMs;
+                    if (_debugTurnField != null) {
+                        _debugTurnField.setData(1);
                     }
+                    _recordLap();
                 }
             }
-        } catch (ex) {
-            _logCrash("detection: " + ex.getErrorMessage());
         }
     }
 
@@ -482,21 +453,21 @@ class SwimModel {
     }
 
     private function _recordLap() as Void {
-        lapCount += 1;
-        totalDistanceM = lapCount * getPoolLength();
+        lapCount       += 1;
+        totalDistanceM  = lapCount * getPoolLength();
 
+        // Mettre à jour la distance totale (session)
         if (_distanceField != null) {
             _distanceField.setData(totalDistanceM.toFloat());
         }
+
+        // Écrire la distance de cette longueur (lap) puis déclencher le lap FIT
+        // Garmin calcule la distance native à partir des laps enregistrés
         if (_lapDistanceField != null) {
             _lapDistanceField.setData(getPoolLength().toFloat());
         }
         if (_session != null) {
-            try {
-                _session.addLap();
-            } catch (ex) {
-                _logCrash("addLap: " + ex.getErrorMessage());
-            }
+            _session.addLap();
         }
 
         var nowMs = elapsedMs;
@@ -505,12 +476,6 @@ class SwimModel {
             if (lapDurationMs > 0) {
                 var secPerLength = lapDurationMs / 1000.0f;
                 var secPer100m   = (secPerLength / getPoolLength()) * 100.0f;
-                
-                // Protection : s'assurer que _lapTimes existe
-                if (_lapTimes == null) {
-                    _lapTimes = [] as Array<Number>;
-                }
-                
                 _lapTimes.add(secPer100m.toNumber());
                 if (_lapTimes.size() > 3) {
                     _lapTimes = _lapTimes.slice(1, null);

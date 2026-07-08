@@ -64,13 +64,6 @@ class PoolSetupView extends WatchUi.View {
         dc.drawText(w / 2, 164, Graphics.FONT_XTINY,
                     "UP: reglages",
                     Graphics.TEXT_JUSTIFY_CENTER);
-
-        var crashInfo = _model.lastCrashInfo();
-        if (!crashInfo.equals("Aucune erreur enregistree")) {
-            dc.setColor(Graphics.COLOR_RED, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, 20, Graphics.FONT_XTINY,
-                        crashInfo, Graphics.TEXT_JUSTIFY_CENTER);
-        }
     }
 
     private function _drawArrowUp(dc as Graphics.Dc, cx as Number, cy as Number) as Void {
